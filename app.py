@@ -4,6 +4,7 @@ from datetime import date, datetime, time
 from enum import Enum
 from typing import Dict, Generator, List, Optional
 from uuid import uuid4
+import json
 
 from fastapi import Depends, FastAPI, HTTPException, Query, status as http_status
 from pydantic import BaseModel, Field
@@ -14,6 +15,7 @@ from sqlalchemy import (
     Enum as SqlEnum,
     ForeignKey,
     Integer,
+    Numeric,
     String,
     Text,
     Time,
@@ -23,6 +25,7 @@ from sqlalchemy import (
     or_,
     select,
 )
+from sqlalchemy.dialects.mysql import LONGTEXT
 from sqlalchemy.engine import Engine
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Mapped, declarative_base, mapped_column, relationship, sessionmaker
@@ -35,6 +38,11 @@ class IncidentStatus(str, Enum):
     pending = "pending"
     in_progress = "in_progress"
     completed = "completed"
+
+
+class FindingType(str, Enum):
+    good_practice = "good_practice"
+    point_of_improvement = "point_of_improvement"
 
 
 settings = get_settings()
@@ -84,6 +92,70 @@ class RCAAnswerORM(Base):
     created_at: Mapped[datetime] = mapped_column(DateTime, nullable=False, default=datetime.utcnow)
 
     incident: Mapped[IncidentORM] = relationship("IncidentORM", back_populates="rca_answers")
+
+
+class SafetyWalkORM(Base):
+    __tablename__ = "safety_walks"
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True)
+    walk_date: Mapped[date] = mapped_column(Date, nullable=False)
+    walk_time: Mapped[Optional[time]] = mapped_column(Time)
+    site: Mapped[str] = mapped_column(String(255), nullable=False)
+    area: Mapped[Optional[str]] = mapped_column(String(255))
+    mode: Mapped[Optional[str]] = mapped_column(String(100))
+    contact: Mapped[Optional[str]] = mapped_column(String(255))
+    is_virtual: Mapped[int] = mapped_column(Integer, default=0, nullable=False)
+    comments: Mapped[Optional[str]] = mapped_column(Text)
+    status: Mapped[IncidentStatus] = mapped_column(SqlEnum(IncidentStatus), default=IncidentStatus.pending, nullable=False)
+    reported_by: Mapped[Optional[str]] = mapped_column(String(255))
+    reported_by_role: Mapped[Optional[str]] = mapped_column(String(255))
+    created_at: Mapped[datetime] = mapped_column(DateTime, nullable=False, default=datetime.utcnow)
+    updated_at: Mapped[datetime] = mapped_column(DateTime, nullable=False, default=datetime.utcnow, onupdate=datetime.utcnow)
+
+    findings: Mapped[List["SafetyWalkFindingORM"]] = relationship(
+        "SafetyWalkFindingORM",
+        back_populates="safety_walk",
+        cascade="all, delete-orphan",
+        order_by="SafetyWalkFindingORM.id",
+    )
+    responses: Mapped[List["SafetyWalkResponseORM"]] = relationship(
+        "SafetyWalkResponseORM",
+        back_populates="safety_walk",
+        cascade="all, delete-orphan",
+        order_by="SafetyWalkResponseORM.position",
+    )
+
+
+class SafetyWalkFindingORM(Base):
+    __tablename__ = "safety_walk_findings"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    safety_walk_id: Mapped[str] = mapped_column(String(36), ForeignKey("safety_walks.id", ondelete="CASCADE"), nullable=False)
+    finding_type: Mapped[FindingType] = mapped_column(SqlEnum(FindingType), nullable=False)
+    description: Mapped[Optional[str]] = mapped_column(Text)
+    signature_url: Mapped[Optional[str]] = mapped_column(LONGTEXT)
+    photos_json: Mapped[Optional[str]] = mapped_column(Text)
+    created_at: Mapped[datetime] = mapped_column(DateTime, nullable=False, default=datetime.utcnow)
+
+    safety_walk: Mapped[SafetyWalkORM] = relationship("SafetyWalkORM", back_populates="findings")
+
+
+class SafetyWalkResponseORM(Base):
+    __tablename__ = "safety_walk_responses"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    safety_walk_id: Mapped[str] = mapped_column(String(36), ForeignKey("safety_walks.id", ondelete="CASCADE"), nullable=False)
+    category: Mapped[Optional[str]] = mapped_column(String(255))
+    position: Mapped[int] = mapped_column(Integer, default=1, nullable=False)
+    question: Mapped[str] = mapped_column(Text, nullable=False)
+    answer: Mapped[Optional[str]] = mapped_column(Text)
+    score: Mapped[Optional[float]] = mapped_column(Numeric(5, 2))
+    created_at: Mapped[datetime] = mapped_column(DateTime, nullable=False, default=datetime.utcnow)
+
+    safety_walk: Mapped[SafetyWalkORM] = relationship("SafetyWalkORM", back_populates="responses")
+
+
+Base.metadata.create_all(bind=engine)
 
 
 def get_db() -> Generator[Session, None, None]:
@@ -173,6 +245,87 @@ class IncidentListResponse(BaseModel):
     meta: Dict[str, object]
 
 
+class SafetyWalkFindingBase(BaseModel):
+    finding_type: FindingType = Field(..., description="Type of finding")
+    description: Optional[str] = Field(None, description="Finding description")
+    photos: List[str] = Field(default_factory=list, description="Photo URLs associated with the finding")
+    signature_url: Optional[str] = Field(None, description="Signature asset URL")
+
+
+class SafetyWalkFindingCreate(SafetyWalkFindingBase):
+    pass
+
+
+class SafetyWalkFinding(SafetyWalkFindingBase):
+    id: int
+    created_at: datetime
+
+
+class SafetyWalkResponseBase(BaseModel):
+    category: Optional[str] = Field(None, description="Checklist category")
+    position: int = Field(1, ge=1, description="Display order")
+    question: str = Field(..., description="Question text")
+    answer: Optional[str] = Field(None, description="Answer provided")
+    score: Optional[float] = Field(None, ge=0, le=100, description="Score or completion percentage")
+
+
+class SafetyWalkResponseCreate(SafetyWalkResponseBase):
+    pass
+
+
+class SafetyWalkResponse(SafetyWalkResponseBase):
+    id: int
+    created_at: datetime
+
+
+class SafetyWalkBase(BaseModel):
+    walk_date: date = Field(..., description="Date of the safety walk")
+    walk_time: Optional[time] = Field(None, description="Time of the safety walk")
+    site: str = Field(..., description="Site name")
+    area: Optional[str] = Field(None, description="Area visited")
+    mode: Optional[str] = Field(None, description="Audit mode")
+    contact: Optional[str] = Field(None, description="Primary contact")
+    is_virtual: bool = Field(False, description="Indicates if the walk was virtual")
+    comments: Optional[str] = Field(None, description="Additional comments")
+    status: IncidentStatus = Field(IncidentStatus.pending, description="Workflow status")
+    reported_by: Optional[str] = Field(None, description="Reporter name")
+    reported_by_role: Optional[str] = Field(None, description="Reporter role")
+
+
+class SafetyWalkCreate(SafetyWalkBase):
+    findings: List[SafetyWalkFindingCreate] = Field(default_factory=list)
+    responses: List[SafetyWalkResponseCreate] = Field(default_factory=list)
+
+
+class SafetyWalkUpdate(BaseModel):
+    walk_date: Optional[date] = None
+    walk_time: Optional[time] = None
+    site: Optional[str] = None
+    area: Optional[str] = None
+    mode: Optional[str] = None
+    contact: Optional[str] = None
+    is_virtual: Optional[bool] = None
+    comments: Optional[str] = None
+    status: Optional[IncidentStatus] = None
+    reported_by: Optional[str] = None
+    reported_by_role: Optional[str] = None
+    findings: Optional[List[SafetyWalkFindingCreate]] = None
+    responses: Optional[List[SafetyWalkResponseCreate]] = None
+
+
+class SafetyWalk(SafetyWalkBase):
+    id: str
+    findings: List[SafetyWalkFinding]
+    responses: List[SafetyWalkResponse]
+    created_at: datetime
+    updated_at: datetime
+
+
+class SafetyWalkListResponse(BaseModel):
+    data: List[SafetyWalk]
+    meta: Dict[str, object]
+
+
 def to_investigation_team(row: IncidentORM) -> Optional[InvestigationTeam]:
     if not any([row.chairman, row.investigator, row.safety_officer]):
         return None
@@ -208,6 +361,48 @@ def to_incident_model(row: IncidentORM) -> Incident:
                 created_at=answer.created_at,
             )
             for answer in row.rca_answers
+        ],
+        created_at=row.created_at,
+        updated_at=row.updated_at,
+    )
+
+
+def to_safety_walk_model(row: SafetyWalkORM) -> SafetyWalk:
+    return SafetyWalk(
+        id=row.id,
+        walk_date=row.walk_date,
+        walk_time=row.walk_time,
+        site=row.site,
+        area=row.area,
+        mode=row.mode,
+        contact=row.contact,
+        is_virtual=bool(row.is_virtual),
+        comments=row.comments,
+        status=row.status,
+        reported_by=row.reported_by,
+        reported_by_role=row.reported_by_role,
+        findings=[
+            SafetyWalkFinding(
+                id=finding.id,
+                finding_type=finding.finding_type,
+                description=finding.description,
+                photos=json.loads(finding.photos_json) if finding.photos_json else [],
+                signature_url=finding.signature_url,
+                created_at=finding.created_at,
+            )
+            for finding in row.findings
+        ],
+        responses=[
+            SafetyWalkResponse(
+                id=response.id,
+                category=response.category,
+                position=response.position,
+                question=response.question,
+                answer=response.answer,
+                score=float(response.score) if response.score is not None else None,
+                created_at=response.created_at,
+            )
+            for response in row.responses
         ],
         created_at=row.created_at,
         updated_at=row.updated_at,
@@ -396,4 +591,186 @@ def update_incident(incident_id: str, payload: IncidentUpdate, db: Session = Dep
     return to_incident_model(row)
 
 
+@app.get("/safety-walks", response_model=SafetyWalkListResponse, tags=["Safety Walks"])
+def list_safety_walks(
+    status: Optional[IncidentStatus] = Query(None, description="Filter by workflow status"),
+    search: Optional[str] = Query(None, description="Search across site, area, contact"),
+    start_date: Optional[date] = Query(None, description="Filter safety walks on/after this date"),
+    end_date: Optional[date] = Query(None, description="Filter safety walks on/before this date"),
+    page: int = Query(1, ge=1, description="Page number"),
+    page_size: int = Query(10, ge=1, le=100, description="Items per page"),
+    db: Session = Depends(get_db),
+) -> SafetyWalkListResponse:
+    filters = []
+    if status:
+        filters.append(SafetyWalkORM.status == status)
+    if start_date:
+        filters.append(SafetyWalkORM.walk_date >= start_date)
+    if end_date:
+        filters.append(SafetyWalkORM.walk_date <= end_date)
+
+    query = select(SafetyWalkORM).order_by(SafetyWalkORM.walk_date.desc(), SafetyWalkORM.walk_time.desc())
+    if filters:
+        query = query.where(and_(*filters))
+    if search:
+        like_term = f"%{search.lower()}%"
+        query = query.where(
+            or_(
+                func.lower(SafetyWalkORM.site).like(like_term),
+                func.lower(SafetyWalkORM.area).like(like_term),
+                func.lower(SafetyWalkORM.contact).like(like_term),
+                func.lower(SafetyWalkORM.comments).like(like_term),
+            )
+        )
+
+    total = db.scalar(select(func.count()).select_from(query.subquery()))
+    page = max(page, 1)
+    offset = (page - 1) * page_size
+    rows = db.execute(query.offset(offset).limit(page_size)).unique().scalars().all()
+    for row in rows:
+        row.findings
+        row.responses
+
+    stat_query = select(SafetyWalkORM.status, func.count()).group_by(SafetyWalkORM.status)
+    status_totals = {row[0].value: row[1] for row in db.execute(stat_query)}
+    for value in (IncidentStatus.pending.value, IncidentStatus.in_progress.value, IncidentStatus.completed.value):
+        status_totals.setdefault(value, 0)
+    status_totals["total"] = sum(status_totals.values())
+    status_totals["filtered_total"] = total or 0
+    status_totals["page"] = page
+    status_totals["page_size"] = page_size
+    status_totals["page_count"] = ((total or 0) + page_size - 1) // page_size if total else 0
+    status_totals["results_on_page"] = len(rows)
+
+    return SafetyWalkListResponse(
+        data=[to_safety_walk_model(row) for row in rows],
+        meta=status_totals,
+    )
+
+
+@app.post("/safety-walks", response_model=SafetyWalk, status_code=http_status.HTTP_201_CREATED, tags=["Safety Walks"])
+def create_safety_walk(payload: SafetyWalkCreate, db: Session = Depends(get_db)) -> SafetyWalk:
+    walk_id = str(uuid4())
+    db_walk = SafetyWalkORM(
+        id=walk_id,
+        walk_date=payload.walk_date,
+        walk_time=payload.walk_time,
+        site=payload.site,
+        area=payload.area,
+        mode=payload.mode,
+        contact=payload.contact,
+        is_virtual=1 if payload.is_virtual else 0,
+        comments=payload.comments,
+        status=payload.status,
+        reported_by=payload.reported_by,
+        reported_by_role=payload.reported_by_role,
+    )
+    db.add(db_walk)
+
+    for finding in payload.findings:
+        db_walk.findings.append(
+            SafetyWalkFindingORM(
+                finding_type=finding.finding_type,
+                description=finding.description,
+                signature_url=finding.signature_url,
+                photos_json=json.dumps(finding.photos) if finding.photos else None,
+            )
+        )
+
+    for response in payload.responses:
+        db_walk.responses.append(
+            SafetyWalkResponseORM(
+                category=response.category,
+                position=response.position,
+                question=response.question,
+                answer=response.answer,
+                score=response.score,
+            )
+        )
+
+    try:
+        db.commit()
+    except IntegrityError as exc:
+        db.rollback()
+        raise HTTPException(status_code=400, detail="Failed to create safety walk") from exc
+
+    db.refresh(db_walk)
+    db_walk.findings
+    db_walk.responses
+    return to_safety_walk_model(db_walk)
+
+
+@app.get("/safety-walks/{walk_id}", response_model=SafetyWalk, tags=["Safety Walks"])
+def get_safety_walk(walk_id: str, db: Session = Depends(get_db)) -> SafetyWalk:
+    row = db.get(SafetyWalkORM, walk_id)
+    if not row:
+        raise HTTPException(status_code=404, detail="Safety walk not found")
+    row.findings
+    row.responses
+    return to_safety_walk_model(row)
+
+
+@app.put("/safety-walks/{walk_id}", response_model=SafetyWalk, tags=["Safety Walks"])
+def update_safety_walk(walk_id: str, payload: SafetyWalkUpdate, db: Session = Depends(get_db)) -> SafetyWalk:
+    update_data = payload.model_dump(exclude_unset=True)
+    if not update_data:
+        raise HTTPException(status_code=400, detail="No fields provided for update")
+
+    row = db.get(SafetyWalkORM, walk_id)
+    if not row:
+        raise HTTPException(status_code=404, detail="Safety walk not found")
+
+    for field in (
+        "walk_date",
+        "walk_time",
+        "site",
+        "area",
+        "mode",
+        "contact",
+        "comments",
+        "status",
+        "reported_by",
+        "reported_by_role",
+    ):
+        if field in update_data:
+            setattr(row, field, update_data[field])
+
+    if "is_virtual" in update_data:
+        row.is_virtual = 1 if update_data["is_virtual"] else 0
+
+    if payload.findings is not None:
+        row.findings.clear()
+        for finding in payload.findings:
+            row.findings.append(
+                SafetyWalkFindingORM(
+                    finding_type=finding.finding_type,
+                    description=finding.description,
+                    signature_url=finding.signature_url,
+                    photos_json=json.dumps(finding.photos) if finding.photos else None,
+                )
+            )
+
+    if payload.responses is not None:
+        row.responses.clear()
+        for response in payload.responses:
+            row.responses.append(
+                SafetyWalkResponseORM(
+                    category=response.category,
+                    position=response.position,
+                    question=response.question,
+                    answer=response.answer,
+                    score=response.score,
+                )
+            )
+
+    try:
+        db.commit()
+    except IntegrityError as exc:
+        db.rollback()
+        raise HTTPException(status_code=400, detail="Failed to update safety walk") from exc
+
+    db.refresh(row)
+    row.findings
+    row.responses
+    return to_safety_walk_model(row)
 
