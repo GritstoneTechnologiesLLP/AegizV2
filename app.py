@@ -45,6 +45,12 @@ class FindingType(str, Enum):
     point_of_improvement = "point_of_improvement"
 
 
+class AuditAnswer(str, Enum):
+    yes = "yes"
+    no = "no"
+    na = "na"
+
+
 settings = get_settings()
 engine: Engine = create_engine(settings.database_url, pool_pre_ping=True, future=True)
 SessionLocal = sessionmaker(bind=engine, autoflush=False, autocommit=False, future=True)
@@ -153,6 +159,64 @@ class SafetyWalkResponseORM(Base):
     created_at: Mapped[datetime] = mapped_column(DateTime, nullable=False, default=datetime.utcnow)
 
     safety_walk: Mapped[SafetyWalkORM] = relationship("SafetyWalkORM", back_populates="responses")
+
+
+class AuditORM(Base):
+    __tablename__ = "audits"
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True)
+    title: Mapped[str] = mapped_column(String(255), nullable=False)
+    area: Mapped[Optional[str]] = mapped_column(String(255))
+    template: Mapped[Optional[str]] = mapped_column(String(255))
+    site: Mapped[Optional[str]] = mapped_column(String(255))
+    contact: Mapped[Optional[str]] = mapped_column(String(255))
+    is_virtual: Mapped[int] = mapped_column(Integer, default=0, nullable=False)
+    comments: Mapped[Optional[str]] = mapped_column(Text)
+    status: Mapped[IncidentStatus] = mapped_column(SqlEnum(IncidentStatus), default=IncidentStatus.pending, nullable=False)
+    reported_by: Mapped[Optional[str]] = mapped_column(String(255))
+    reported_by_role: Mapped[Optional[str]] = mapped_column(String(255))
+    audit_date: Mapped[date] = mapped_column(Date, nullable=False)
+    audit_time: Mapped[Optional[time]] = mapped_column(Time)
+    created_at: Mapped[datetime] = mapped_column(DateTime, nullable=False, default=datetime.utcnow)
+    updated_at: Mapped[datetime] = mapped_column(DateTime, nullable=False, default=datetime.utcnow, onupdate=datetime.utcnow)
+
+    responses: Mapped[List["AuditResponseORM"]] = relationship(
+        "AuditResponseORM",
+        back_populates="audit",
+        cascade="all, delete-orphan",
+        order_by="AuditResponseORM.position",
+    )
+    observations: Mapped[List["AuditObservationORM"]] = relationship(
+        "AuditObservationORM",
+        back_populates="audit",
+        cascade="all, delete-orphan",
+        order_by="AuditObservationORM.id",
+    )
+
+
+class AuditResponseORM(Base):
+    __tablename__ = "audit_responses"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    audit_id: Mapped[str] = mapped_column(String(36), ForeignKey("audits.id", ondelete="CASCADE"), nullable=False)
+    position: Mapped[int] = mapped_column(Integer, default=1, nullable=False)
+    question: Mapped[str] = mapped_column(Text, nullable=False)
+    answer: Mapped[AuditAnswer] = mapped_column(SqlEnum(AuditAnswer), default=AuditAnswer.na, nullable=False)
+    observation: Mapped[Optional[str]] = mapped_column(Text)
+    created_at: Mapped[datetime] = mapped_column(DateTime, nullable=False, default=datetime.utcnow)
+
+    audit: Mapped[AuditORM] = relationship("AuditORM", back_populates="responses")
+
+
+class AuditObservationORM(Base):
+    __tablename__ = "audit_observations"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    audit_id: Mapped[str] = mapped_column(String(36), ForeignKey("audits.id", ondelete="CASCADE"), nullable=False)
+    note: Mapped[str] = mapped_column(Text, nullable=False)
+    created_at: Mapped[datetime] = mapped_column(DateTime, nullable=False, default=datetime.utcnow)
+
+    audit: Mapped[AuditORM] = relationship("AuditORM", back_populates="observations")
 
 
 Base.metadata.create_all(bind=engine)
@@ -326,6 +390,85 @@ class SafetyWalkListResponse(BaseModel):
     meta: Dict[str, object]
 
 
+class AuditResponseBase(BaseModel):
+    position: int = Field(1, ge=1, description="Display order")
+    question: str = Field(..., description="Audit question")
+    answer: AuditAnswer = Field(AuditAnswer.na, description="Answer selection")
+    observation: Optional[str] = Field(None, description="Additional observation per question")
+
+
+class AuditResponseCreate(AuditResponseBase):
+    pass
+
+
+class AuditResponse(AuditResponseBase):
+    id: int
+    created_at: datetime
+
+
+class AuditObservationBase(BaseModel):
+    note: str = Field(..., description="Observation note")
+
+
+class AuditObservationCreate(AuditObservationBase):
+    pass
+
+
+class AuditObservation(AuditObservationBase):
+    id: int
+    created_at: datetime
+
+
+class AuditBase(BaseModel):
+    title: str = Field(..., description="Audit title")
+    area: Optional[str] = Field(None, description="Area of audit")
+    template: Optional[str] = Field(None, description="Template name")
+    site: Optional[str] = Field(None, description="Site name")
+    contact: Optional[str] = Field(None, description="Contact person")
+    is_virtual: bool = Field(False, description="Whether audit is virtual")
+    comments: Optional[str] = Field(None, description="General comments")
+    status: IncidentStatus = Field(IncidentStatus.pending, description="Workflow status")
+    reported_by: Optional[str] = Field(None, description="Reporter name")
+    reported_by_role: Optional[str] = Field(None, description="Reporter role")
+    audit_date: date = Field(..., description="Audit date")
+    audit_time: Optional[time] = Field(None, description="Audit time")
+
+
+class AuditCreate(AuditBase):
+    responses: List[AuditResponseCreate] = Field(default_factory=list)
+    observations: List[AuditObservationCreate] = Field(default_factory=list)
+
+
+class AuditUpdate(BaseModel):
+    title: Optional[str] = None
+    area: Optional[str] = None
+    template: Optional[str] = None
+    site: Optional[str] = None
+    contact: Optional[str] = None
+    is_virtual: Optional[bool] = None
+    comments: Optional[str] = None
+    status: Optional[IncidentStatus] = None
+    reported_by: Optional[str] = None
+    reported_by_role: Optional[str] = None
+    audit_date: Optional[date] = None
+    audit_time: Optional[time] = None
+    responses: Optional[List[AuditResponseCreate]] = None
+    observations: Optional[List[AuditObservationCreate]] = None
+
+
+class Audit(AuditBase):
+    id: str
+    responses: List[AuditResponse]
+    observations: List[AuditObservation]
+    created_at: datetime
+    updated_at: datetime
+
+
+class AuditListResponse(BaseModel):
+    data: List[Audit]
+    meta: Dict[str, object]
+
+
 def to_investigation_team(row: IncidentORM) -> Optional[InvestigationTeam]:
     if not any([row.chairman, row.investigator, row.safety_officer]):
         return None
@@ -403,6 +546,45 @@ def to_safety_walk_model(row: SafetyWalkORM) -> SafetyWalk:
                 created_at=response.created_at,
             )
             for response in row.responses
+        ],
+        created_at=row.created_at,
+        updated_at=row.updated_at,
+    )
+
+
+def to_audit_model(row: AuditORM) -> Audit:
+    return Audit(
+        id=row.id,
+        title=row.title,
+        area=row.area,
+        template=row.template,
+        site=row.site,
+        contact=row.contact,
+        is_virtual=bool(row.is_virtual),
+        comments=row.comments,
+        status=row.status,
+        reported_by=row.reported_by,
+        reported_by_role=row.reported_by_role,
+        audit_date=row.audit_date,
+        audit_time=row.audit_time,
+        responses=[
+            AuditResponse(
+                id=response.id,
+                position=response.position,
+                question=response.question,
+                answer=response.answer,
+                observation=response.observation,
+                created_at=response.created_at,
+            )
+            for response in row.responses
+        ],
+        observations=[
+            AuditObservation(
+                id=observation.id,
+                note=observation.note,
+                created_at=observation.created_at,
+            )
+            for observation in row.observations
         ],
         created_at=row.created_at,
         updated_at=row.updated_at,
@@ -773,4 +955,178 @@ def update_safety_walk(walk_id: str, payload: SafetyWalkUpdate, db: Session = De
     row.findings
     row.responses
     return to_safety_walk_model(row)
+
+
+@app.get("/audits", response_model=AuditListResponse, tags=["Audits"])
+def list_audits(
+    status: Optional[IncidentStatus] = Query(None, description="Filter by workflow status"),
+    search: Optional[str] = Query(None, description="Search across title, area, template"),
+    start_date: Optional[date] = Query(None, description="Audits on/after this date"),
+    end_date: Optional[date] = Query(None, description="Audits on/before this date"),
+    page: int = Query(1, ge=1, description="Page number"),
+    page_size: int = Query(10, ge=1, le=100, description="Items per page"),
+    db: Session = Depends(get_db),
+) -> AuditListResponse:
+    filters = []
+    if status:
+        filters.append(AuditORM.status == status)
+    if start_date:
+        filters.append(AuditORM.audit_date >= start_date)
+    if end_date:
+        filters.append(AuditORM.audit_date <= end_date)
+
+    query = select(AuditORM).order_by(AuditORM.audit_date.desc(), AuditORM.audit_time.desc())
+    if filters:
+        query = query.where(and_(*filters))
+    if search:
+        like_term = f"%{search.lower()}%"
+        query = query.where(
+            or_(
+                func.lower(AuditORM.title).like(like_term),
+                func.lower(AuditORM.area).like(like_term),
+                func.lower(AuditORM.template).like(like_term),
+            )
+        )
+
+    total = db.scalar(select(func.count()).select_from(query.subquery()))
+    page = max(page, 1)
+    offset = (page - 1) * page_size
+    rows = db.execute(query.offset(offset).limit(page_size)).unique().scalars().all()
+    for row in rows:
+        row.responses
+        row.observations
+
+    stat_query = select(AuditORM.status, func.count()).group_by(AuditORM.status)
+    status_totals = {row[0].value: row[1] for row in db.execute(stat_query)}
+    for value in (IncidentStatus.pending.value, IncidentStatus.in_progress.value, IncidentStatus.completed.value):
+        status_totals.setdefault(value, 0)
+    status_totals["total"] = sum(status_totals.values())
+    status_totals["filtered_total"] = total or 0
+    status_totals["page"] = page
+    status_totals["page_size"] = page_size
+    status_totals["page_count"] = ((total or 0) + page_size - 1) // page_size if total else 0
+    status_totals["results_on_page"] = len(rows)
+
+    return AuditListResponse(data=[to_audit_model(row) for row in rows], meta=status_totals)
+
+
+@app.post("/audits", response_model=Audit, status_code=http_status.HTTP_201_CREATED, tags=["Audits"])
+def create_audit(payload: AuditCreate, db: Session = Depends(get_db)) -> Audit:
+    audit_id = str(uuid4())
+    db_audit = AuditORM(
+        id=audit_id,
+        title=payload.title,
+        area=payload.area,
+        template=payload.template,
+        site=payload.site,
+        contact=payload.contact,
+        is_virtual=1 if payload.is_virtual else 0,
+        comments=payload.comments,
+        status=payload.status,
+        reported_by=payload.reported_by,
+        reported_by_role=payload.reported_by_role,
+        audit_date=payload.audit_date,
+        audit_time=payload.audit_time,
+    )
+    db.add(db_audit)
+
+    for response in payload.responses:
+        db_audit.responses.append(
+            AuditResponseORM(
+                position=response.position,
+                question=response.question,
+                answer=response.answer,
+                observation=response.observation,
+            )
+        )
+
+    for observation in payload.observations:
+        db_audit.observations.append(
+            AuditObservationORM(
+                note=observation.note,
+            )
+        )
+
+    try:
+        db.commit()
+    except IntegrityError as exc:
+        db.rollback()
+        raise HTTPException(status_code=400, detail="Failed to create audit") from exc
+
+    db.refresh(db_audit)
+    db_audit.responses
+    db_audit.observations
+    return to_audit_model(db_audit)
+
+
+@app.get("/audits/{audit_id}", response_model=Audit, tags=["Audits"])
+def get_audit(audit_id: str, db: Session = Depends(get_db)) -> Audit:
+    row = db.get(AuditORM, audit_id)
+    if not row:
+        raise HTTPException(status_code=404, detail="Audit not found")
+    row.responses
+    row.observations
+    return to_audit_model(row)
+
+
+@app.put("/audits/{audit_id}", response_model=Audit, tags=["Audits"])
+def update_audit(audit_id: str, payload: AuditUpdate, db: Session = Depends(get_db)) -> Audit:
+    update_data = payload.model_dump(exclude_unset=True)
+    if not update_data:
+        raise HTTPException(status_code=400, detail="No fields provided for update")
+
+    row = db.get(AuditORM, audit_id)
+    if not row:
+        raise HTTPException(status_code=404, detail="Audit not found")
+
+    for field in (
+        "title",
+        "area",
+        "template",
+        "site",
+        "contact",
+        "comments",
+        "status",
+        "reported_by",
+        "reported_by_role",
+        "audit_date",
+        "audit_time",
+    ):
+        if field in update_data:
+            setattr(row, field, update_data[field])
+
+    if "is_virtual" in update_data:
+        row.is_virtual = 1 if update_data["is_virtual"] else 0
+
+    if payload.responses is not None:
+        row.responses.clear()
+        for response in payload.responses:
+            row.responses.append(
+                AuditResponseORM(
+                    position=response.position,
+                    question=response.question,
+                    answer=response.answer,
+                    observation=response.observation,
+                )
+            )
+
+    if payload.observations is not None:
+        row.observations.clear()
+        for observation in payload.observations:
+            row.observations.append(
+                AuditObservationORM(
+                    note=observation.note,
+                )
+            )
+
+    try:
+        db.commit()
+    except IntegrityError as exc:
+        db.rollback()
+        raise HTTPException(status_code=400, detail="Failed to update audit") from exc
+
+    db.refresh(row)
+    row.responses
+    row.observations
+    return to_audit_model(row)
 

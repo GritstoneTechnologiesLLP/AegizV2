@@ -76,4 +76,45 @@ CREATE TABLE IF NOT EXISTS safety_walk_responses (
     INDEX idx_safety_walk_responses_walk_id (safety_walk_id)
 );
 
+CREATE TABLE IF NOT EXISTS audits (
+    id CHAR(36) NOT NULL PRIMARY KEY,
+    title VARCHAR(255) NOT NULL,
+    area VARCHAR(255),
+    template VARCHAR(255),
+    site VARCHAR(255),
+    contact VARCHAR(255),
+    is_virtual TINYINT(1) NOT NULL DEFAULT 0,
+    comments TEXT,
+    status ENUM('pending', 'in_progress', 'completed') NOT NULL DEFAULT 'pending',
+    reported_by VARCHAR(255),
+    reported_by_role VARCHAR(255),
+    audit_date DATE NOT NULL,
+    audit_time TIME,
+    created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    updated_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+    INDEX idx_audits_status (status),
+    INDEX idx_audits_audit_date (audit_date)
+);
+
+CREATE TABLE IF NOT EXISTS audit_responses (
+    id BIGINT NOT NULL AUTO_INCREMENT PRIMARY KEY,
+    audit_id CHAR(36) NOT NULL,
+    position INT NOT NULL DEFAULT 1,
+    question TEXT NOT NULL,
+    answer ENUM('yes', 'no', 'na') NOT NULL DEFAULT 'na',
+    observation TEXT,
+    created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    FOREIGN KEY (audit_id) REFERENCES audits(id) ON DELETE CASCADE,
+    INDEX idx_audit_responses_audit_id (audit_id)
+);
+
+CREATE TABLE IF NOT EXISTS audit_observations (
+    id BIGINT NOT NULL AUTO_INCREMENT PRIMARY KEY,
+    audit_id CHAR(36) NOT NULL,
+    note TEXT NOT NULL,
+    created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    FOREIGN KEY (audit_id) REFERENCES audits(id) ON DELETE CASCADE,
+    INDEX idx_audit_observations_audit_id (audit_id)
+);
+
 
