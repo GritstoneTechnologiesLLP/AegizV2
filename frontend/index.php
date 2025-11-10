@@ -188,20 +188,20 @@ if (isset($_GET['proxy'])) {
             <button class="pb-4 text-sm font-semibold text-slate-400 hover:text-slate-600">All Incidents</button>
           </div>
 
-          <div class="grid gap-4 sm:grid-cols-2 xl:grid-cols-4">
-            <article class="rounded-2xl border border-purple-200 bg-purple-50 p-5 shadow-sm">
+          <div class="grid gap-4 sm:grid-cols-2 xl:grid-cols-4" id="statusCards">
+            <article data-status="all" class="rounded-2xl border border-purple-200 bg-purple-50 p-5 shadow-sm cursor-pointer transition ring-0 ring-purple-400/40 status-card">
               <p class="text-sm font-semibold text-purple-700">Total</p>
               <p id="summary-total" class="text-3xl font-bold text-purple-900">0</p>
             </article>
-            <article class="rounded-2xl border border-rose-200 bg-rose-50 p-5 shadow-sm">
+            <article data-status="pending" class="rounded-2xl border border-rose-200 bg-rose-50 p-5 shadow-sm cursor-pointer transition ring-0 ring-rose-400/40 status-card">
               <p class="text-sm font-semibold text-rose-600">Pending</p>
               <p id="summary-pending" class="text-3xl font-bold text-rose-800">0</p>
             </article>
-            <article class="rounded-2xl border border-sky-200 bg-sky-50 p-5 shadow-sm">
+            <article data-status="in_progress" class="rounded-2xl border border-sky-200 bg-sky-50 p-5 shadow-sm cursor-pointer transition ring-0 ring-sky-400/40 status-card">
               <p class="text-sm font-semibold text-sky-600">In Progress</p>
               <p id="summary-in-progress" class="text-3xl font-bold text-sky-800">0</p>
             </article>
-            <article class="rounded-2xl border border-emerald-200 bg-emerald-50 p-5 shadow-sm">
+            <article data-status="completed" class="rounded-2xl border border-emerald-200 bg-emerald-50 p-5 shadow-sm cursor-pointer transition ring-0 ring-emerald-400/40 status-card">
               <p class="text-sm font-semibold text-emerald-600">Completed</p>
               <p id="summary-completed" class="text-3xl font-bold text-emerald-700">0</p>
             </article>
@@ -430,6 +430,7 @@ if (isset($_GET['proxy'])) {
 
   <script>
     let currentPage = 1;
+    let selectedStatus = 'all';
     const modal = document.getElementById("incidentModal");
     const form = document.getElementById("incidentForm");
     const stepElements = Array.from(document.querySelectorAll(".form-step"));
@@ -440,6 +441,7 @@ if (isset($_GET['proxy'])) {
     const cancelBtn = document.getElementById("modalCancel");
     const closeBtn = document.getElementById("modalClose");
     const addBtn = document.getElementById("addIncidentBtn");
+    const statusCards = Array.from(document.querySelectorAll(".status-card"));
     let currentStepIndex = 0;
 
     const defaultRcaQuestions = Array.from(document.querySelectorAll("[data-rca-input]")).map((textarea) => textarea.dataset.question);
@@ -477,6 +479,9 @@ if (isset($_GET['proxy'])) {
         page: currentPage,
         page_size: pageSize
       });
+      if (selectedStatus && selectedStatus !== 'all') {
+        params.set('status', selectedStatus);
+      }
       try {
         const response = await requestViaProxy('incidents', {}, params);
         const payload = await response.json();
@@ -490,10 +495,12 @@ if (isset($_GET['proxy'])) {
     }
 
     function renderSummary(meta) {
-      document.getElementById("summary-total").textContent = meta.total ?? 0;
+      const total = meta.total ?? meta.filtered_total ?? 0;
+      document.getElementById("summary-total").textContent = total;
       document.getElementById("summary-pending").textContent = meta.pending ?? 0;
       document.getElementById("summary-in-progress").textContent = meta.in_progress ?? 0;
       document.getElementById("summary-completed").textContent = meta.completed ?? 0;
+      highlightActiveCard();
     }
 
     function renderIncidents(incidents) {
@@ -604,6 +611,17 @@ if (isset($_GET['proxy'])) {
     document.getElementById("pageSizeSelect").addEventListener("change", () => {
       currentPage = 1;
       fetchIncidents();
+    });
+
+    statusCards.forEach((card) => {
+      card.addEventListener("click", () => {
+        const status = card.dataset.status || 'all';
+        if (status !== selectedStatus) {
+          selectedStatus = status;
+          currentPage = 1;
+          fetchIncidents();
+        }
+      });
     });
 
     addBtn.addEventListener("click", openModal);
@@ -772,6 +790,16 @@ if (isset($_GET['proxy'])) {
 
     function prettifyStatus(status) {
       return status.replace(/_/g, " ").replace(/\b\w/g, (char) => char.toUpperCase());
+    }
+
+    function highlightActiveCard() {
+      statusCards.forEach((card) => {
+        const isActive = card.dataset.status === selectedStatus || (selectedStatus === 'all' && card.dataset.status === 'all');
+        card.classList.toggle("ring-4", isActive);
+        card.classList.toggle("shadow-lg", isActive);
+        card.classList.toggle("opacity-100", isActive);
+        card.classList.toggle("opacity-60", !isActive && selectedStatus !== 'all');
+      });
     }
 
     async function handleSubmit(event) {
