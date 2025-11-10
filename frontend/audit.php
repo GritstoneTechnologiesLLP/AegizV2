@@ -127,7 +127,7 @@ if (isset($_GET['proxy'])) {
         <a href="index.php" class="flex size-12 items-center justify-center rounded-2xl bg-slate-100 text-slate-500" title="Incidents">!</a>
         <a href="safetywalk.php" class="flex size-12 items-center justify-center rounded-2xl bg-slate-100 text-slate-500" title="Safety Walks">👟</a>
         <a href="audit.php" class="flex size-12 items-center justify-center rounded-2xl bg-brand/10" title="Audits">📋</a>
-        <button class="flex size-12 items-center justify-center rounded-2xl bg-slate-100 text-slate-500">👥</button>
+        <a href="users.php" class="flex size-12 items-center justify-center rounded-2xl bg-slate-100 text-slate-500" title="Users">👤</a>
       </nav>
     </aside>
 

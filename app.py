@@ -219,6 +219,67 @@ class AuditObservationORM(Base):
     audit: Mapped[AuditORM] = relationship("AuditORM", back_populates="observations")
 
 
+class UserStatus(str, Enum):
+    active = "active"
+    inactive = "inactive"
+
+
+class UserORM(Base):
+    __tablename__ = "users"
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True)
+    first_name: Mapped[str] = mapped_column(String(255), nullable=False)
+    last_name: Mapped[str] = mapped_column(String(255), nullable=False)
+    email: Mapped[str] = mapped_column(String(255), nullable=False, unique=True)
+    phone: Mapped[Optional[str]] = mapped_column(String(50))
+    profile_image_url: Mapped[Optional[str]] = mapped_column(LONGTEXT)
+    address_line1: Mapped[Optional[str]] = mapped_column(String(255))
+    address_line2: Mapped[Optional[str]] = mapped_column(String(255))
+    country: Mapped[Optional[str]] = mapped_column(String(100))
+    state: Mapped[Optional[str]] = mapped_column(String(100))
+    district: Mapped[Optional[str]] = mapped_column(String(100))
+    zipcode: Mapped[Optional[str]] = mapped_column(String(20))
+    status: Mapped[UserStatus] = mapped_column(SqlEnum(UserStatus), default=UserStatus.active, nullable=False)
+    added_on: Mapped[datetime] = mapped_column(DateTime, nullable=False, default=datetime.utcnow)
+    updated_at: Mapped[datetime] = mapped_column(DateTime, nullable=False, default=datetime.utcnow, onupdate=datetime.utcnow)
+
+    roles: Mapped[List["UserRoleORM"]] = relationship(
+        "UserRoleORM",
+        back_populates="user",
+        cascade="all, delete-orphan",
+        order_by="UserRoleORM.id",
+    )
+    branches: Mapped[List["UserBranchORM"]] = relationship(
+        "UserBranchORM",
+        back_populates="user",
+        cascade="all, delete-orphan",
+        order_by="UserBranchORM.id",
+    )
+
+
+class UserRoleORM(Base):
+    __tablename__ = "user_roles"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    user_id: Mapped[str] = mapped_column(String(36), ForeignKey("users.id", ondelete="CASCADE"), nullable=False)
+    role_name: Mapped[str] = mapped_column(String(255), nullable=False)
+    created_at: Mapped[datetime] = mapped_column(DateTime, nullable=False, default=datetime.utcnow)
+
+    user: Mapped[UserORM] = relationship("UserORM", back_populates="roles")
+
+
+class UserBranchORM(Base):
+    __tablename__ = "user_branches"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    user_id: Mapped[str] = mapped_column(String(36), ForeignKey("users.id", ondelete="CASCADE"), nullable=False)
+    branch_name: Mapped[str] = mapped_column(String(255), nullable=False)
+    branch_location: Mapped[Optional[str]] = mapped_column(String(255))
+    created_at: Mapped[datetime] = mapped_column(DateTime, nullable=False, default=datetime.utcnow)
+
+    user: Mapped[UserORM] = relationship("UserORM", back_populates="branches")
+
+
 Base.metadata.create_all(bind=engine)
 
 
@@ -469,6 +530,90 @@ class AuditListResponse(BaseModel):
     meta: Dict[str, object]
 
 
+class UserRole(BaseModel):
+    id: int
+    role_name: str
+    created_at: datetime
+
+
+class UserBranch(BaseModel):
+    id: int
+    branch_name: str
+    branch_location: Optional[str]
+    created_at: datetime
+
+
+class UserRoleCreate(BaseModel):
+    role_name: str
+
+
+class UserBranchCreate(BaseModel):
+    branch_name: str
+    branch_location: Optional[str] = None
+
+
+class UserBase(BaseModel):
+    first_name: str
+    last_name: str
+    email: str
+    phone: Optional[str] = None
+    profile_image_url: Optional[str] = None
+    address_line1: Optional[str] = None
+    address_line2: Optional[str] = None
+    country: Optional[str] = None
+    state: Optional[str] = None
+    district: Optional[str] = None
+    zipcode: Optional[str] = None
+    status: UserStatus = Field(UserStatus.active, description="User active status")
+
+
+class UserCreate(UserBase):
+    roles: List[UserRoleCreate] = Field(default_factory=list)
+    branches: List[UserBranchCreate] = Field(default_factory=list)
+
+
+class UserUpdate(BaseModel):
+    first_name: Optional[str] = None
+    last_name: Optional[str] = None
+    email: Optional[str] = None
+    phone: Optional[str] = None
+    profile_image_url: Optional[str] = None
+    address_line1: Optional[str] = None
+    address_line2: Optional[str] = None
+    country: Optional[str] = None
+    state: Optional[str] = None
+    district: Optional[str] = None
+    zipcode: Optional[str] = None
+    status: Optional[UserStatus] = None
+    roles: Optional[List[UserRoleCreate]] = None
+    branches: Optional[List[UserBranchCreate]] = None
+
+
+class User(BaseModel):
+    id: str
+    first_name: str
+    last_name: str
+    email: str
+    phone: Optional[str]
+    profile_image_url: Optional[str]
+    address_line1: Optional[str]
+    address_line2: Optional[str]
+    country: Optional[str]
+    state: Optional[str]
+    district: Optional[str]
+    zipcode: Optional[str]
+    status: UserStatus
+    added_on: datetime
+    updated_at: datetime
+    roles: List[UserRole]
+    branches: List[UserBranch]
+
+
+class UserListResponse(BaseModel):
+    data: List[User]
+    meta: Dict[str, object]
+
+
 def to_investigation_team(row: IncidentORM) -> Optional[InvestigationTeam]:
     if not any([row.chairman, row.investigator, row.safety_officer]):
         return None
@@ -588,6 +733,43 @@ def to_audit_model(row: AuditORM) -> Audit:
         ],
         created_at=row.created_at,
         updated_at=row.updated_at,
+    )
+
+
+def to_user_model(row: UserORM) -> User:
+    return User(
+        id=row.id,
+        first_name=row.first_name,
+        last_name=row.last_name,
+        email=row.email,
+        phone=row.phone,
+        profile_image_url=row.profile_image_url,
+        address_line1=row.address_line1,
+        address_line2=row.address_line2,
+        country=row.country,
+        state=row.state,
+        district=row.district,
+        zipcode=row.zipcode,
+        status=row.status,
+        added_on=row.added_on,
+        updated_at=row.updated_at,
+        roles=[
+            UserRole(
+                id=role.id,
+                role_name=role.role_name,
+                created_at=role.created_at,
+            )
+            for role in row.roles
+        ],
+        branches=[
+            UserBranch(
+                id=branch.id,
+                branch_name=branch.branch_name,
+                branch_location=branch.branch_location,
+                created_at=branch.created_at,
+            )
+            for branch in row.branches
+        ],
     )
 
 
@@ -1129,4 +1311,159 @@ def update_audit(audit_id: str, payload: AuditUpdate, db: Session = Depends(get_
     row.responses
     row.observations
     return to_audit_model(row)
+
+
+@app.get("/users", response_model=UserListResponse, tags=["Users"])
+def list_users(
+    status: Optional[UserStatus] = Query(None, description="Filter by user status"),
+    search: Optional[str] = Query(None, description="Search across name, email, phone"),
+    page: int = Query(1, ge=1, description="Page number"),
+    page_size: int = Query(10, ge=1, le=100, description="Items per page"),
+    db: Session = Depends(get_db),
+) -> UserListResponse:
+    filters = []
+    if status:
+        filters.append(UserORM.status == status)
+
+    query = select(UserORM).order_by(UserORM.added_on.desc())
+    if filters:
+        query = query.where(and_(*filters))
+    if search:
+        like_term = f"%{search.lower()}%"
+        query = query.where(
+            or_(
+                func.lower(UserORM.first_name).like(like_term),
+                func.lower(UserORM.last_name).like(like_term),
+                func.lower(UserORM.email).like(like_term),
+                func.lower(UserORM.phone).like(like_term),
+            )
+        )
+
+    total = db.scalar(select(func.count()).select_from(query.subquery()))
+    page = max(page, 1)
+    offset = (page - 1) * page_size
+    rows = db.execute(query.offset(offset).limit(page_size)).unique().scalars().all()
+    for row in rows:
+        row.roles
+        row.branches
+
+    status_totals_query = select(UserORM.status, func.count()).group_by(UserORM.status)
+    status_totals = {row[0].value: row[1] for row in db.execute(status_totals_query)}
+    for value in (UserStatus.active.value, UserStatus.inactive.value):
+        status_totals.setdefault(value, 0)
+    status_totals["total"] = sum(status_totals.values())
+    status_totals["filtered_total"] = total or 0
+    status_totals["page"] = page
+    status_totals["page_size"] = page_size
+    status_totals["page_count"] = ((total or 0) + page_size - 1) // page_size if total else 0
+    status_totals["results_on_page"] = len(rows)
+
+    return UserListResponse(data=[to_user_model(row) for row in rows], meta=status_totals)
+
+
+@app.post("/users", response_model=User, status_code=http_status.HTTP_201_CREATED, tags=["Users"])
+def create_user(payload: UserCreate, db: Session = Depends(get_db)) -> User:
+    user_id = str(uuid4())
+    db_user = UserORM(
+        id=user_id,
+        first_name=payload.first_name,
+        last_name=payload.last_name,
+        email=payload.email,
+        phone=payload.phone,
+        profile_image_url=payload.profile_image_url,
+        address_line1=payload.address_line1,
+        address_line2=payload.address_line2,
+        country=payload.country,
+        state=payload.state,
+        district=payload.district,
+        zipcode=payload.zipcode,
+        status=payload.status,
+    )
+    db.add(db_user)
+
+    for role in payload.roles:
+        db_user.roles.append(UserRoleORM(role_name=role.role_name))
+
+    for branch in payload.branches:
+        db_user.branches.append(
+            UserBranchORM(
+                branch_name=branch.branch_name,
+                branch_location=branch.branch_location,
+            )
+        )
+
+    try:
+        db.commit()
+    except IntegrityError as exc:
+        db.rollback()
+        raise HTTPException(status_code=400, detail="Failed to create user") from exc
+
+    db.refresh(db_user)
+    db_user.roles
+    db_user.branches
+    return to_user_model(db_user)
+
+
+@app.get("/users/{user_id}", response_model=User, tags=["Users"])
+def get_user(user_id: str, db: Session = Depends(get_db)) -> User:
+    row = db.get(UserORM, user_id)
+    if not row:
+        raise HTTPException(status_code=404, detail="User not found")
+    row.roles
+    row.branches
+    return to_user_model(row)
+
+
+@app.put("/users/{user_id}", response_model=User, tags=["Users"])
+def update_user(user_id: str, payload: UserUpdate, db: Session = Depends(get_db)) -> User:
+    update_data = payload.model_dump(exclude_unset=True)
+    if not update_data:
+        raise HTTPException(status_code=400, detail="No fields provided for update")
+
+    row = db.get(UserORM, user_id)
+    if not row:
+        raise HTTPException(status_code=404, detail="User not found")
+
+    for field in (
+        "first_name",
+        "last_name",
+        "email",
+        "phone",
+        "profile_image_url",
+        "address_line1",
+        "address_line2",
+        "country",
+        "state",
+        "district",
+        "zipcode",
+        "status",
+    ):
+        if field in update_data:
+            setattr(row, field, update_data[field])
+
+    if payload.roles is not None:
+        row.roles.clear()
+        for role in payload.roles:
+            row.roles.append(UserRoleORM(role_name=role.role_name))
+
+    if payload.branches is not None:
+        row.branches.clear()
+        for branch in payload.branches:
+            row.branches.append(
+                UserBranchORM(
+                    branch_name=branch.branch_name,
+                    branch_location=branch.branch_location,
+                )
+            )
+
+    try:
+        db.commit()
+    except IntegrityError as exc:
+        db.rollback()
+        raise HTTPException(status_code=400, detail="Failed to update user") from exc
+
+    db.refresh(row)
+    row.roles
+    row.branches
+    return to_user_model(row)
 

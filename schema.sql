@@ -117,4 +117,41 @@ CREATE TABLE IF NOT EXISTS audit_observations (
     INDEX idx_audit_observations_audit_id (audit_id)
 );
 
+CREATE TABLE IF NOT EXISTS users (
+    id CHAR(36) NOT NULL PRIMARY KEY,
+    first_name VARCHAR(255) NOT NULL,
+    last_name VARCHAR(255) NOT NULL,
+    email VARCHAR(255) NOT NULL UNIQUE,
+    phone VARCHAR(50),
+    profile_image_url LONGTEXT,
+    address_line1 VARCHAR(255),
+    address_line2 VARCHAR(255),
+    country VARCHAR(100),
+    state VARCHAR(100),
+    district VARCHAR(100),
+    zipcode VARCHAR(20),
+    status ENUM('active', 'inactive') NOT NULL DEFAULT 'active',
+    added_on DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    updated_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP
+);
+
+CREATE TABLE IF NOT EXISTS user_roles (
+    id BIGINT NOT NULL AUTO_INCREMENT PRIMARY KEY,
+    user_id CHAR(36) NOT NULL,
+    role_name VARCHAR(255) NOT NULL,
+    created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE,
+    INDEX idx_user_roles_user_id (user_id)
+);
+
+CREATE TABLE IF NOT EXISTS user_branches (
+    id BIGINT NOT NULL AUTO_INCREMENT PRIMARY KEY,
+    user_id CHAR(36) NOT NULL,
+    branch_name VARCHAR(255) NOT NULL,
+    branch_location VARCHAR(255),
+    created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE,
+    INDEX idx_user_branches_user_id (user_id)
+);
+
 
