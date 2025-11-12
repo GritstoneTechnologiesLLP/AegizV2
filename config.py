@@ -1,6 +1,5 @@
 from functools import lru_cache
 from pathlib import Path
-from typing import Literal
 from urllib.parse import quote_plus
 
 from dotenv import load_dotenv
@@ -19,7 +18,6 @@ _load_environment_file()
 
 
 class Settings(BaseSettings):
-    environment: Literal["dev", "prod", "test"] = Field("dev", alias="ENVIRONMENT")
     db_host: str = Field("127.0.0.1", alias="DB_HOST")
     db_port: int = Field(3306, alias="DB_PORT")
     db_user: str = Field("root", alias="DB_USER")
