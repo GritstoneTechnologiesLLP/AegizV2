@@ -2,43 +2,20 @@ from functools import lru_cache
 from pathlib import Path
 from typing import Literal
 from urllib.parse import quote_plus
-import os
 
 from dotenv import load_dotenv
 from pydantic import Field
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
-_ENV_FILES_LOADED = False
 
-
-def _load_environment_files() -> None:
-    global _ENV_FILES_LOADED
-    if _ENV_FILES_LOADED:
-        return
-
+def _load_environment_file() -> None:
     project_root = Path(__file__).resolve().parent
-    base_candidates = [
-        project_root / ".env",
-        project_root / "env" / "common.env",
-    ]
-    for candidate in base_candidates:
-        if candidate.exists():
-            load_dotenv(candidate, override=False)
-
-    env_name = os.getenv("ENVIRONMENT", "dev").lower().strip()
-    env_candidates = [
-        project_root / f".env.{env_name}",
-        project_root / "env" / f"{env_name}.env",
-    ]
-    for candidate in env_candidates:
-        if candidate.exists():
-            load_dotenv(candidate, override=True)
-            break
-
-    _ENV_FILES_LOADED = True
+    env_file = project_root / ".env"
+    if env_file.exists():
+        load_dotenv(env_file, override=True)
 
 
-_load_environment_files()
+_load_environment_file()
 
 
 class Settings(BaseSettings):
